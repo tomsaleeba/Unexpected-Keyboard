@@ -51,60 +51,38 @@ let key_activated state key =
 	let p = List.find (fun p -> p.key == key) state in
 	p.value
 
-let down ~layout ptrid x y state =
-	match KeyboardLayout.pick layout x y with
-	| Some (_, key)	-> Key_down (key, pointer ptrid x y key :: state)
-	| None			-> Ignore
+let on_touch layout state ev =
+	match ev.Component_Android.event with
+	| Move		->
+		begin match get_pointer ev.id state with
+		| exception Not_found	-> Ignore
+		| p						->
+			let dx, dy = p.down_x -. ev.x, p.down_y -. ev.y in
+			let value = pointed_value dx dy p.key in
+			if value = p.value
+			then Ignore
+			else
+				let state = { p with value } :: remove_pointer state ev.id in
+				Pointer_changed (p.key, p.value, value, state)
+		end
 
-let up ptrid x y state =
-	match get_pointer ptrid state with
-	| exception Not_found	-> Ignore
-	| p						->
-		let dx, dy = p.down_x -. x, p.down_y -. y in
-		let v = pointed_value dx dy p.key in
-		Key_up (p.key, v, remove_pointer state ptrid)
+	| Up		->
+		begin match get_pointer ev.id state with
+		| exception Not_found	-> Ignore
+		| p						->
+			let dx, dy = p.down_x -. ev.x, p.down_y -. ev.y in
+			let v = pointed_value dx dy p.key in
+			Key_up (p.key, v, remove_pointer state ev.id)
+		end
 
-let cancel ptrid x y state =
-	match get_pointer ptrid state with
-	| exception Not_found	-> Ignore
-	| p						->
-		Cancelled (p.key, p.value, remove_pointer state ptrid)
+	| Down		->
+		begin match KeyboardLayout.pick layout ev.x ev.y with
+		| Some (_, key)	-> Key_down (key, pointer ev.id ev.x ev.y key :: state)
+		| None			-> Ignore
+		end
 
-let move ptrid x y state =
-	match get_pointer ptrid state with
-	| exception Not_found	-> Ignore
-	| p						->
-		let dx, dy = p.down_x -. x, p.down_y -. y in
-		let value = pointed_value dx dy p.key in
-		if value = p.value
-		then Ignore
-		else
-			let state = { p with value } :: remove_pointer state ptrid in
-			Pointer_changed (p.key, p.value, value, state)
-
-(** Process touch events *)
-let on_touch view layout state ev =
-	let go f index =
-		let x = Motion_event.get_x ev index /. float (View.get_width view)
-		and y = Motion_event.get_y ev index /. float (View.get_height view)
-		and ptrid = Motion_event.get_pointer_id ev index in
-		f ptrid x y state
-	in
-	let go' f = go f (Motion_event.get_action_index ev) in
-	let rec go_move i =
-		match go move i with
-		| Ignore when i > 0	-> go_move (i - 1)
-		| r					-> r
-	in
-	let action = Motion_event.get_action_masked ev in
-	if action = motion_event_ACTION_MOVE
-	then go_move (Motion_event.get_pointer_count ev - 1)
-	else if action = motion_event_ACTION_UP
-		|| action = motion_event_ACTION_POINTER_UP
-	then go' up
-	else if action = motion_event_ACTION_DOWN
-		|| action = motion_event_ACTION_POINTER_DOWN
-	then go' (down ~layout)
-	else if action = motion_event_ACTION_CANCEL
-	then go' cancel
-	else Ignore
+	| Cancel	->
+		begin match get_pointer ev.id state with
+		| exception Not_found -> Ignore
+		| p -> Cancelled (p.key, p.value, remove_pointer state ev.id)
+		end

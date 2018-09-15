@@ -33,6 +33,13 @@ object
 	method invalidate : unit = "invalidate"
 end
 
+class%java view_group "android.view.ViewGroup" =
+object
+	inherit view
+	method add_view : view -> int -> unit = "addView"
+	method remove_view_at : int -> unit = "removeViewAt"
+end
+
 class%java key_event "android.view.KeyEvent" =
 object
 	initializer (create' : long -> long -> int -> int -> int -> int -> _)

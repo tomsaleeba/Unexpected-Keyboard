@@ -1,172 +1,90 @@
 open Android_content
-open Android_graphics
 open Android_inputmethodservice
 open Android_util
 open Android_view
 
 external _hack : unit -> unit = "Java_juloo_javacaml_Caml_startup"
 
-(** Key value to string *)
-let render_key =
-	let open Key in
-	let render_event =
-		function
-		| Escape		-> "Esc"
-		| Tab			-> "\xE2\x87\xA5"
-		| Backspace		-> "\xE2\x8C\xAB"
-		| Delete		-> "\xE2\x8C\xA6"
-		| Enter			-> "\xE2\x8F\x8E"
-		| Left			-> "\xE2\x86\x90"
-		| Right			-> "\xE2\x86\x92"
-		| Up			-> "\xE2\x86\x91"
-		| Down			-> "\xE2\x86\x93"
-		| Page_up		-> "\xE2\x87\x9E"
-		| Page_down		-> "\xE2\x87\x9F"
-		| Home			-> "\xE2\x86\x96"
-		| End			-> "\xE2\x86\x98"
-	and render_modifier =
-		function
-		| Shift				-> "\xE2\x87\xA7"
-		| Ctrl				-> "ctrl"
-		| Alt				-> "alt"
-		| Accent Acute		-> "\xCC\x81"
-		| Accent Grave		-> "\xCC\x80"
-		| Accent Circumflex	-> "\xCC\x82"
-		| Accent Tilde		-> "\xCC\x83"
-		| Accent Cedilla	-> "\xCC\xA7"
-		| Accent Trema		-> "\xCC\x88"
-	in
-	function
-	| Typing (Char (c, _))		->
-		(* TODO: OCaml and Java are useless at unicode *)
-		Java.to_string (Utils.java_string_of_code_point c)
-	| Typing (Event (ev, _))	-> render_event ev
-	| Modifier m				-> render_modifier m
-	| Nothing					-> ""
-	| Change_pad Default		-> "ABC"
-	| Change_pad Numeric		-> "123"
+(** Send a character through the current input connection *)
+let send_char ims cp =
+	let ic = Input_method_service.get_current_input_connection ims in
+	let txt = Utils.java_string_of_code_point cp in
+	ignore (Input_connection.commit_text ic txt 1)
 
-type t = {
-	touch_state		: Touch_event.state;
-	layout			: Key.t KeyboardLayout.t;
-	modifiers		: Modifiers.t;
-	ims				: Input_method_service.t;
-	view			: View.t;
-	key_repeat		: (Key.t * bool ref) list;
-	dp				: float -> float;
-}
+let key_char_map = lazy Key_character_map.(load (get'virtual_keyboard ()))
 
-let task t = Keyboard_service.Task t
-
-let view_invalidate view =
-	task (fun () -> View.invalidate view; Lwt.return (fun t -> t, []))
-
-let send tv =
-	let send t =
-		begin match tv with
-			| Key.Char (c, 0)	-> Keyboard_service.send_char t.ims c
-			| Char (c, meta)	-> Keyboard_service.send_char_meta t.ims c meta
-			| Event (ev, meta)	-> Keyboard_service.send_event t.ims ev meta
-		end;
-		t, []
-	in
-	task (fun () -> Lwt.return send)
-
-let create ~ims ~view ~dp () = {
-	touch_state = Touch_event.empty_state;
-	layout = Layouts.qwerty;
-	modifiers = Modifiers.empty;
-	key_repeat = [];
-	ims; view; dp
-}
-
-let start_repeat ?(timeout=1000L) key action t =
-	let task t = Keyboard_service.Task t in
-	let enabled = ref true in
-	let rec repeat_loop ~timeout () =
-		let do_repeat () t =
-			if !enabled
-			then t, [ task (repeat_loop ~timeout:200L); action ]
-			else t, []
+(** Send a character as 2 key events (down and up)
+	Allows setting the meta field *)
+let send_char_meta ims cp meta =
+	match Char.chr cp with
+	| exception _	-> ()
+	| c				->
+		let events =
+			let chars = Jarray.create_char 1 in
+			Jarray.set_char chars 0 c;
+			Key_character_map.get_events (Lazy.force key_char_map) chars
 		in
-		Lwt.map do_repeat (Keyboard_service.timeout timeout)
+		let ic = Input_method_service.get_current_input_connection ims in
+		for i = 0 to Jarray.length events - 1 do
+			let ev = Jarray.get_object events i in
+			let action = Key_event.get_action ev
+			and code = Key_event.get_key_code ev in
+			let ev = Key_event.create' 1L 1L action code 1 meta in
+			ignore (Input_connection.send_key_event ic ev)
+		done
+
+(** Likes `Input_method_service.send_down_up_key_events`
+		with an extra `meta` parameter *)
+let send_event ims evt meta =
+	let code =
+		let open Key_event in
+		match evt with
+		| Key.Escape	-> get'keycode_escape ()
+		| Tab			-> get'keycode_tab ()
+		| Backspace		-> get'keycode_del ()
+		| Delete		-> get'keycode_forward_del ()
+		| Enter			-> get'keycode_enter ()
+		| Left			-> get'keycode_dpad_left ()
+		| Right			-> get'keycode_dpad_right ()
+		| Up			-> get'keycode_dpad_up ()
+		| Down			-> get'keycode_dpad_down ()
+		| Page_up		-> get'keycode_page_up ()
+		| Page_down		-> get'keycode_page_down ()
+		| Home			-> get'keycode_home ()
+		| End			-> get'keycode_move_end ()
 	in
-	let key_repeat = (key, enabled) :: t.key_repeat in
-	{ t with key_repeat }, [ task (repeat_loop ~timeout) ]
-
-let rec stop_repeat key = function
-	| (k', enabled) :: tl when k' == key ->
-		enabled := false;
-		stop_repeat key tl
-	| hd :: tl	-> hd :: stop_repeat key tl
-	| []		-> []
-
-let stop_repeat key =
-	let do_remove t =
-		{ t with key_repeat = stop_repeat key t.key_repeat }, []
+	let time = Android_os.System_clock.uptime_millis () in
+	let mk_event action =
+		let flags = Key_event.(get'flag_keep_touch_mode ()
+				lor get'flag_soft_keyboard ()) in
+		Key_event.create time time action code 0 meta ~-1 0 flags
 	in
-	Keyboard_service.Task (fun () -> Lwt.return do_remove)
+	let ic = Input_method_service.get_current_input_connection ims in
+	let send = Input_connection.send_key_event ic in
+	ignore (send (mk_event (Key_event.get'action_down ()))
+		&& send (mk_event (Key_event.get'action_up ())))
 
-let handle_down t key = function
-	| Key.Modifier m	->
-		{ t with modifiers = Modifiers.on_down m t.modifiers }, []
-	| Typing tv			-> start_repeat key (send tv) t
-	| Change_pad pad	->
-		let layout = match pad with
-			| Default	-> Layouts.qwerty
-			| Numeric	-> Layouts.numeric
-		in
-		{ t with layout;
-			modifiers = Modifiers.empty;
-			touch_state = Touch_event.empty_state }, []
-	| _					-> t, []
-
-let handle_cancel t key = function
-	| Key.Modifier m	->
-		{ t with modifiers = Modifiers.on_cancel m t.modifiers }, []
-	| Typing tv			-> t, [ stop_repeat key ]
-	| _					-> t, []
-
-let handle_up t key = function
-	| Key.Typing tv			->
-		let tv = Modifiers.apply tv t.modifiers
-		and modifiers = Modifiers.on_key_press t.modifiers in
-		{ t with modifiers }, [ stop_repeat key; send tv ]
-	| Modifier m			->
-		{ t with modifiers = Modifiers.on_up m t.modifiers }, []
-	| _						-> t, []
-
-let update (`Touch_event ev) t =
-	let invalidate = view_invalidate t.view in
-	match Touch_event.on_touch t.view t.layout t.touch_state ev with
-	| Key_down (key, ts)				->
-		let t, tasks = handle_down t key key.v in
-		{ t with touch_state = ts }, invalidate :: tasks
-	| Key_up (key, v, ts)				->
-		let t, tasks = handle_up t key v in
-		{ t with touch_state = ts }, invalidate :: tasks
-	| Pointer_changed (key, v', v, ts)	->
-		let t, tasks = handle_cancel t key v' in
-		let t, tasks' = handle_down t key v in
-		{ t with touch_state = ts }, invalidate :: (tasks @ tasks')
-	| Cancelled (key, v, ts)			->
-		let t, tasks = handle_cancel t key v in
-		{ t with touch_state = ts }, invalidate :: tasks
-	| Ignore							-> t, []
-
-let draw t canvas =
-	let is_activated key =
-		match Touch_event.key_activated t.touch_state key with
-		| exception Not_found	-> false
-		| _						-> true
-	and render_key k =
-		let k = match k with
-			| Key.Typing tv	-> Key.Typing (Modifiers.apply tv t.modifiers)
-			| k				-> k
-		in
-		render_key k
+let keyboard_service ims =
+	let view () =
+		let ims' = object
+			method send = function
+				| Key.Char (c, 0)	-> send_char ims c
+				| Char (c, meta)	-> send_char_meta ims c meta
+				| Event (ev, meta)	-> send_event ims ev meta
+		end in
+		let root, view = ComponentTmpl_T.root_one Keyboard_view.view in
+		Component.run (Keyboard_view.create ims', []) root (fun t f -> f t)
+		|> Lwt.async;
+		view
 	in
-	Drawing.keyboard is_activated t.dp render_key t.layout canvas
+	object
+		val view = lazy (view ())
+		method onInitializeInterface = ()
+		method onBindInput = ()
+		method onCreateInputView = Lazy.force view
+		method onCreateCandidatesView = Java.null
+		method onStartInput _ _ = ()
+	end
 
 let () =
 	Printexc.record_backtrace true;

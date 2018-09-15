@@ -11,14 +11,33 @@ type pos = {
 
 type 'a t = (pos * 'a) array
 
+let array_rev a =
+	let len = Array.length a in
+	Array.init len (fun i -> a.(len - i - 1))
+
+let rec array_bsearch cmp a lo hi =
+	if lo > hi
+	then None
+	else
+		let mid = (lo + hi) / 2 in
+		let mid' = a.(mid) in
+		match cmp mid' with
+		| 0				-> Some mid'
+		| d when d < 0	-> array_bsearch cmp a lo (mid - 1)
+		| _				-> array_bsearch cmp a (mid + 1) hi
+
+let array_bsearch cmp a = array_bsearch cmp a 0 (Array.length a - 1)
+
 (* Search the key at the position (x, y) *)
 let pick t x y =
 	let cmp (p, _) =
-		Utils.Cmp.(between p.y (p.y +. p.height) y
-			&&& between p.x (p.x +. p.width) x) in
-	match Utils.Array.binary_search t cmp with
-	| `Should_be_at _	-> None
-	| `Found_at i		-> Some t.(i)
+		if y < p.y then ~-1
+		else if y >= p.y +. p.height then ~+1
+		else if x < p.x then ~-1
+		else if x >= p.x +. p.width then ~+1
+		else 0
+	in
+	array_bsearch cmp t
 
 let iter = Array.iter
 
@@ -64,6 +83,6 @@ struct
 			acc, y +. height
 		in
 		let keys, _ = List.fold_left fold_row ([], 0.) rows in
-		Utils.Array.rev (Array.of_list keys)
+		array_rev (Array.of_list keys)
 
 end
