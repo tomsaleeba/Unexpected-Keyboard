@@ -1,9 +1,12 @@
-export NDK_HOME = $HOME/.opam/4.04.0-armeabi/android-ndk
-export NDK_PLATFORM = $(NDK_HOME)/platforms/android-24/arch-arm/
+define check_defined
+$(if $($(1)),,$(error Variable $(1) not defined))
+endef
 
-export ANDROID_HOME = /opt/android-sdk/
-export ANDROID_BUILD_TOOLS = $(ANDROID_HOME)/build-tools/28.0.3
-export ANDROID_PLATFORM = $(ANDROID_HOME)/platforms/android-29
+$(call check_defined,NDK_HOME)
+$(call check_defined,NDK_PLATFORM)
+$(call check_defined,ANDROID_HOME)
+$(call check_defined,ANDROID_BUILD_TOOLS)
+$(call check_defined,ANDROID_PLATFORM)
 
 NAME = unexpected-keyboard
 
@@ -18,7 +21,7 @@ EXTRA_JARS := \
 
 ARCHS = armeabi-v7a
 
-armeabi-v7a: SWITCH = 4.04.0-android-arm
+armeabi-v7a: SWITCH = 4.04.0+32bit
 
 all: TARGET = all
 debug: TARGET = debug
