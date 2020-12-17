@@ -3,6 +3,8 @@ open Android_api.Util
 open Android_api.View
 open Android_utils
 
+module Config = Config
+
 (** Key value to string *)
 let render_key =
 	let open Key in
@@ -88,14 +90,14 @@ let handle_task ~ims ~view handle = function
     in
     handle (`Set_layout layout)
 
-let create ~ims view =
+let create ~ims ~config view =
 	let dp =
 		let density = Context.get_resources ims
 			|> Resources.get_display_metrics
 			|> Display_metrics.get'scaled_density in
 		fun x -> x *. density
 	in
-  let t = ref (Keyboard.State.create Layouts.qwerty) in
+  let t = ref (Keyboard.State.create config.Config.layout) in
   let rec handle ev =
     let t', tasks = do_update ~view ev !t in
     t := t';

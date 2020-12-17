@@ -3,6 +3,8 @@
 open Keyboard.Layout.Desc
 open Key
 
+type t = Key.t Keyboard.Layout.t
+
 let key ?(width=1.) ?a ?b ?c ?d v = key ~width Key.{ a; b; c; d; v }
 let c c = Typing (Char (Char.code c, 0))
 let event evt = Typing (Event (evt, 0))
@@ -84,4 +86,8 @@ let numeric = build [
 		key (c '.') ~d:(c ',');
 		key ~width:0.75 (event Enter);
 	]
+]
+
+let layouts = [
+  "qwerty", qwerty;
 ]

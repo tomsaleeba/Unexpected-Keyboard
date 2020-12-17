@@ -1,9 +1,12 @@
 open Android_utils
+open Android_api.Preference
 
 external _hack : unit -> unit = "Java_juloo_javacaml_Caml_startup"
 
 let keyboard_service ims =
-  let view = lazy (CustomView.create ims (Keyboard_view.create ~ims)) in
+  let prefs = Preference_manager.get_default_shared_preferences ims in
+  let config = Keyboard_view.Config.of_shared_preferences prefs in
+  let view = lazy (CustomView.create ims (Keyboard_view.create ~ims ~config)) in
 	object
 		method onInitializeInterface = ()
 		method onBindInput = ()

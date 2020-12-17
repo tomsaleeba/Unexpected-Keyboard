@@ -3,6 +3,7 @@ proguard-project.txt
 bin/*
 gen/*
 *.keystore
+*-keystore.conf
 srcs/_build/*
 **/.merlin
 _build
