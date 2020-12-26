@@ -1,5 +1,7 @@
 FROM ocaml/opam2:4.04
 
+RUN sudo apt update
+
 RUN sudo apt install -y android-sdk
 
 RUN sudo apt install -y m4 gcc-multilib
