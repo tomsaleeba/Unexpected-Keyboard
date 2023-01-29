@@ -1,0 +1,5 @@
+0 center
+1 top left
+2 top right
+3 bottom left
+4 bottom right
